@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Based Data Crawler</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            display: flex;
+            width: 100%;
+            height: 100vh;
+        }
+        .section {
+            width: 50%;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .english-section {
+            background-color: #f0f0f0;
+            border-right: 2px solid #ccc;
+        }
+        .hindi-section {
+            background-color: #e6f7ff;
+        }
+        input {
+            width: 80%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            margin: 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #28a745;
+            color: white;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        li {
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Web Data Alignment</h1>
+
+    <div class="container">
+        <!-- English Section -->
+        <div class="section english-section">
+            <h2>English Website</h2>
+            <input type="text" id="english_url" placeholder="Enter English website URL">
+            <h3>Extracted English Sentences</h3>
+            <ul id="english_list"></ul>
+        </div>
+
+        <!-- Hindi Section -->
+        <div class="section hindi-section">
+            <h2>Hindi Website</h2>
+            <input type="text" id="hindi_url" placeholder="Enter Hindi website URL">
+            <h3>Extracted Hindi Sentences</h3>
+            <ul id="hindi_list"></ul>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div>
+        <button onclick="scrapeData()">Clean & Collect</button>
+        <button onclick="alignData()">Align Sentences</button>
+    </div>
+
+    <h2>Aligned Sentences</h2>
+    <ul id="aligned_list"></ul>
+
+    <script>
+        async function scrapeData() {
+            let english_url = document.getElementById('english_url').value;
+            let hindi_url = document.getElementById('hindi_url').value;
+
+            if (!english_url || !hindi_url) {
+                alert("Please enter both English and Hindi website URLs!");
+                return;
+            }
+
+            let response = await fetch('/scrape', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({english_url, hindi_url})
+            });
+
+            let data = await response.json();
+
+            // Check if the scraper returned an error
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+
+            document.getElementById('english_list').innerHTML = data.english.sentences
+                .map(sentence => `<li>${sentence}</li>`)
+                .join('');
+            
+            document.getElementById('hindi_list').innerHTML = data.hindi.sentences
+                .map(sentence => `<li>${sentence}</li>`)
+                .join('');
+        }
+
+        async function alignData() {
+            let english_sentences = Array.from(document.getElementById('english_list').children).map(li => li.innerText);
+            let hindi_sentences = Array.from(document.getElementById('hindi_list').children).map(li => li.innerText);
+
+            if (english_sentences.length === 0 || hindi_sentences.length === 0) {
+                alert("Please clean & collect data first!");
+                return;
+            }
+
+            let response = await fetch('/align', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({english_sentences, hindi_sentences})
+            });
+
+            let data = await response.json();
+            document.getElementById('aligned_list').innerHTML = data.aligned_data.map(
+                pair => `<li><b>${pair.id}.</b> ${pair.english} - <i>${pair.hindi}</i></li>`
+            ).join('');
+        }
+    </script>
+
+</body>
+</html>
