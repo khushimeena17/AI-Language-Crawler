@@ -56,6 +56,11 @@
             padding: 5px;
             border-bottom: 1px solid #ddd;
         }
+        #loading {
+            display: none;
+            font-size: 16px;
+            color: red;
+        }
     </style>
 </head>
 <body>
@@ -87,7 +92,11 @@
     </div>
 
     <h2>Aligned Sentences</h2>
+    <p id="loading">🔄 Aligning sentences, please wait...</p>
     <ul id="aligned_list"></ul>
+    
+    <!-- CSV Download Section -->
+    <div id="csvDownload"></div>
 
     <script>
         async function scrapeData() {
@@ -107,7 +116,6 @@
 
             let data = await response.json();
 
-            // Check if the scraper returned an error
             if (data.error) {
                 alert(data.error);
                 return;
@@ -131,16 +139,49 @@
                 return;
             }
 
-            let response = await fetch('/align', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({english_sentences, hindi_sentences})
-            });
+            document.getElementById("loading").style.display = "block";  // Show loading message
 
-            let data = await response.json();
-            document.getElementById('aligned_list').innerHTML = data.aligned_data.map(
-                pair => `<li><b>${pair.id}.</b> ${pair.english} - <i>${pair.hindi}</i></li>`
-            ).join('');
+            try {
+                let response = await fetch('/align', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({english_sentences, hindi_sentences})
+                });
+
+                if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+                let data = await response.json();
+
+                // Display aligned sentences
+                document.getElementById('aligned_list').innerHTML = data.aligned_data.map(
+                    pair => `<li><b>${pair.id}.</b> ${pair.english} - <i>${pair.hindi}</i></li>`
+                ).join('');
+
+                // Create CSV Download
+                createCSVDownload(data.aligned_data);
+            } catch (error) {
+                console.error("Error aligning sentences:", error);
+                alert("Failed to align sentences. Check console for details.");
+            } finally {
+                document.getElementById("loading").style.display = "none";  // Hide loading message
+            }
+        }
+
+        function createCSVDownload(aligned_data) {
+            let csvContent = "ID,English,Hindi\n";
+            csvContent += aligned_data.map(row => `${row.id},"${row.english}","${row.hindi}"`).join("\n");
+
+            let blob = new Blob([csvContent], { type: "text/csv" });
+            let url = URL.createObjectURL(blob);
+
+            let downloadLink = document.createElement("a");
+            downloadLink.href = url;
+            downloadLink.download = "aligned_sentences.csv";
+            downloadLink.innerText = "📥 Download CSV";
+
+            let csvContainer = document.getElementById("csvDownload");
+            csvContainer.innerHTML = "";  // Clear previous download link
+            csvContainer.appendChild(downloadLink);
         }
     </script>
 
