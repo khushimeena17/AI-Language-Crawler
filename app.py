@@ -1,184 +1,142 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 import requests
 from bs4 import BeautifulSoup
 from sentence_transformers import SentenceTransformer, util
+import re
+import csv
+import io
 
 app = Flask(__name__)
 
-# Load LaBSE Model for Sentence Alignment
+# Load LaBSE model once
 model = SentenceTransformer("sentence-transformers/LaBSE")
 
-# Function to scrape website text
-def scrape_text(url):
+# --- Utility Functions ---
+
+def clean_text(text):
+    return re.sub(r'\s+', ' ', text.strip())
+
+def split_english_sentences(text):
+    return [clean_text(s) for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()]
+
+def split_hindi_sentences(text):
+    return [clean_text(s) for s in re.split(r'[|।!?]+', text) if s.strip()]
+
+def scrape_text_from_url(url):
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an error for bad response
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Extract only paragraph text (Modify this for better results)
-        paragraphs = soup.find_all("p")
-        sentences = [p.get_text().strip() for p in paragraphs if p.get_text().strip()]
-        
-        return sentences
+        res = requests.get(url, timeout=10)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        for tag in soup(['script', 'style']):
+            tag.extract()
+        return soup.get_text(separator=' ')
     except Exception as e:
-        return {"error": f"Failed to fetch data from {url}: {str(e)}"}
+        return ""
 
-# Function to align sentences
-def align_sentences(english_sentences, hindi_sentences):
-    aligned_pairs = []
+def align_sentences_bidirectional(english_sentences, hindi_sentences, threshold=0.45):
+    from sklearn.metrics.pairwise import cosine_similarity
+    import numpy as np
 
-    # Compute sentence embeddings
-    en_embeddings = model.encode(english_sentences, convert_to_tensor=True)
-    hi_embeddings = model.encode(hindi_sentences, convert_to_tensor=True)
-
-    # Compute cosine similarity
-    similarity_matrix = util.pytorch_cos_sim(en_embeddings, hi_embeddings)
-
-    for i, en_sentence in enumerate(english_sentences):
-        # Find the best matching Hindi sentence
-        best_match_index = similarity_matrix[i].argmax().item()
-        similarity_score = similarity_matrix[i][best_match_index].item()
-
-        if similarity_score > 0.7:  # Threshold for good alignment
-            aligned_pairs.append({
-                "id": len(aligned_pairs) + 1,
-                "english": en_sentence,
-                "hindi": hindi_sentences[best_match_index]
-            })
-
-    return aligned_pairs
-
-# Scrape API
-@app.route('/scrape', methods=['POST'])
-def scrape():
-    data = request.json
-    english_url = data.get("english_url")
-    hindi_url = data.get("hindi_url")
-
-    if not english_url or not hindi_url:
-        return jsonify({"error": "Both URLs are required!"})
-
-    english_sentences = scrape_text(english_url)
-    hindi_sentences = scrape_text(hindi_url)
-
-    if "error" in english_sentences or "error" in hindi_sentences:
-        return jsonify({"error": "Failed to fetch data from one or both URLs!"})
-
-    return jsonify({
-        "english": {"sentences": english_sentences},
-        "hindi": {"sentences": hindi_sentences}
-    })
-
-# Align API
-@app.route('/align', methods=['POST'])
-def align():
-    data = request.json
-    english_sentences = data.get("english_sentences", [])
-    hindi_sentences = data.get("hindi_sentences", [])
+    english_sentences = [s for s in english_sentences if len(s.split()) > 2]
+    hindi_sentences = [s for s in hindi_sentences if len(s.split()) > 2]
 
     if not english_sentences or not hindi_sentences:
-        return jsonify({"error": "Sentences missing!"})
+        return []
 
-    aligned_data = align_sentences(english_sentences, hindi_sentences)
+    english_embeddings = model.encode(english_sentences, convert_to_tensor=True)
+    hindi_embeddings = model.encode(hindi_sentences, convert_to_tensor=True)
 
-    return jsonify({"aligned_data": aligned_data})
+    sim_matrix = cosine_similarity(english_embeddings.cpu().numpy(), hindi_embeddings.cpu().numpy())
 
-# Serve HTML file
+    eng_to_hin = np.argmax(sim_matrix, axis=1)
+    hin_to_eng = np.argmax(sim_matrix, axis=0)
+
+    aligned = []
+    used_eng, used_hin = set(), set()
+    pair_id = 1
+
+    for eng_idx, hin_idx in enumerate(eng_to_hin):
+        if hin_idx < len(hindi_sentences) and hin_to_eng[hin_idx] == eng_idx:
+            score = sim_matrix[eng_idx][hin_idx]
+            if score >= threshold and eng_idx not in used_eng and hin_idx not in used_hin:
+                aligned.append({
+                    'id': pair_id,
+                    'english': english_sentences[eng_idx],
+                    'hindi': hindi_sentences[hin_idx]
+                })
+                used_eng.add(eng_idx)
+                used_hin.add(hin_idx)
+                pair_id += 1
+    return aligned
+
+# --- Flask Routes ---
+
 @app.route('/')
-def home():
+def index():
     return render_template('index.html')
-from flask import Flask, request, jsonify, render_template
-import requests
-from bs4 import BeautifulSoup
-from sentence_transformers import SentenceTransformer, util
 
-app = Flask(__name__)
-
-# Load LaBSE Model for Sentence Alignment
-model = SentenceTransformer("sentence-transformers/LaBSE")
-
-# Function to scrape website text
-def scrape_text(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()  # Raise an error for bad response
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Extract only paragraph text (Modify this for better results)
-        paragraphs = soup.find_all("p")
-        sentences = [p.get_text().strip() for p in paragraphs if p.get_text().strip()]
-        
-        return sentences
-    except Exception as e:
-        return {"error": f"Failed to fetch data from {url}: {str(e)}"}
-
-# Function to align sentences
-def align_sentences(english_sentences, hindi_sentences):
-    aligned_pairs = []
-
-    # Compute sentence embeddings
-    en_embeddings = model.encode(english_sentences, convert_to_tensor=True)
-    hi_embeddings = model.encode(hindi_sentences, convert_to_tensor=True)
-
-    # Compute cosine similarity
-    similarity_matrix = util.pytorch_cos_sim(en_embeddings, hi_embeddings)
-
-    for i, en_sentence in enumerate(english_sentences):
-        # Find the best matching Hindi sentence
-        best_match_index = similarity_matrix[i].argmax().item()
-        similarity_score = similarity_matrix[i][best_match_index].item()
-
-        if similarity_score > 0.7:  # Threshold for good alignment
-            aligned_pairs.append({
-                "id": len(aligned_pairs) + 1,
-                "english": en_sentence,
-                "hindi": hindi_sentences[best_match_index]
-            })
-
-    return aligned_pairs
-
-# Scrape API
 @app.route('/scrape', methods=['POST'])
 def scrape():
-    data = request.json
-    english_url = data.get("english_url")
-    hindi_url = data.get("hindi_url")
+    data = request.get_json()
+    en_url, hi_url = data.get('english_url'), data.get('hindi_url')
 
-    if not english_url or not hindi_url:
-        return jsonify({"error": "Both URLs are required!"})
+    if not en_url or not hi_url:
+        return jsonify({'error': 'Both URLs are required'}), 400
 
-    english_sentences = scrape_text(english_url)
-    hindi_sentences = scrape_text(hindi_url)
-
-    if "error" in english_sentences or "error" in hindi_sentences:
-        return jsonify({"error": "Failed to fetch data from one or both URLs!"})
+    en_text = scrape_text_from_url(en_url)
+    hi_text = scrape_text_from_url(hi_url)
 
     return jsonify({
-        "english": {"sentences": english_sentences},
-        "hindi": {"sentences": hindi_sentences}
+        'english': {'sentences': split_english_sentences(en_text)},
+        'hindi': {'sentences': split_hindi_sentences(hi_text)}
     })
 
-# Align API
 @app.route('/align', methods=['POST'])
 def align():
-    data = request.json
-    english_sentences = data.get("english_sentences", [])
-    hindi_sentences = data.get("hindi_sentences", [])
+    data = request.get_json()
+    en_sentences = data.get('english_sentences', [])
+    hi_sentences = data.get('hindi_sentences', [])
+    aligned = align_sentences_bidirectional(en_sentences, hi_sentences)
+    return jsonify({'aligned_data': aligned})
 
-    if not english_sentences or not hindi_sentences:
-        return jsonify({"error": "Sentences missing!"})
+@app.route('/upload-files', methods=['POST'])
+def upload_files():
+    en_file = request.files.get('english_file')
+    hi_file = request.files.get('hindi_file')
 
-    aligned_data = align_sentences(english_sentences, hindi_sentences)
+    if not en_file or not hi_file:
+        return jsonify({'error': 'Both files are required'}), 400
 
-    return jsonify({"aligned_data": aligned_data})
+    en_text = en_file.read().decode('utf-8')
+    hi_text = hi_file.read().decode('utf-8')
 
-# Serve HTML file
-@app.route('/')
-def home():
-    return render_template('index.html')
+    en_sentences = split_english_sentences(en_text)
+    hi_sentences = split_hindi_sentences(hi_text)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    aligned = align_sentences_bidirectional(en_sentences, hi_sentences)
+    return jsonify({
+        'english': {'sentences': en_sentences},
+        'hindi': {'sentences': hi_sentences},
+        'aligned_data': aligned
+    })
+
+@app.route('/download_csv', methods=['POST'])
+def download_csv():
+    data = request.get_json()
+    aligned_data = data.get('aligned_data', [])
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Serial No.', 'English Sentence', 'Hindi Sentence'])
+    for row in aligned_data:
+        writer.writerow([row['id'], row['english'], row['hindi']])
+    output.seek(0)
+
+    return send_file(
+        io.BytesIO(output.getvalue().encode('utf-8-sig')),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name='aligned_sentences.csv'
+    )
 
 if __name__ == '__main__':
     app.run(debug=True)

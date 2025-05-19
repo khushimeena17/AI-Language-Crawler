@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AI-Based Data Crawler</title>
     <style>
         body {
@@ -14,7 +14,7 @@
         .container {
             display: flex;
             width: 100%;
-            height: 100vh;
+            height: 70vh;
         }
         .section {
             width: 50%;
@@ -28,12 +28,15 @@
         .hindi-section {
             background-color: #e6f7ff;
         }
-        input {
+        input[type="text"] {
             width: 80%;
             padding: 10px;
             margin: 10px 0;
             border: 1px solid #ccc;
             border-radius: 5px;
+        }
+        input[type="file"] {
+            margin: 10px 0;
         }
         button {
             padding: 10px 15px;
@@ -51,6 +54,9 @@
         ul {
             list-style-type: none;
             padding: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
         }
         li {
             padding: 5px;
@@ -60,6 +66,9 @@
             display: none;
             font-size: 16px;
             color: red;
+        }
+        #fileUploadSection {
+            margin-top: 20px;
         }
     </style>
 </head>
@@ -71,7 +80,7 @@
         <!-- English Section -->
         <div class="section english-section">
             <h2>English Website</h2>
-            <input type="text" id="english_url" placeholder="Enter English website URL">
+            <input type="text" id="english_url" placeholder="Enter English website URL" />
             <h3>Extracted English Sentences</h3>
             <ul id="english_list"></ul>
         </div>
@@ -79,22 +88,30 @@
         <!-- Hindi Section -->
         <div class="section hindi-section">
             <h2>Hindi Website</h2>
-            <input type="text" id="hindi_url" placeholder="Enter Hindi website URL">
+            <input type="text" id="hindi_url" placeholder="Enter Hindi website URL" />
             <h3>Extracted Hindi Sentences</h3>
             <ul id="hindi_list"></ul>
         </div>
     </div>
 
-    <!-- Action Buttons -->
+    <!-- Action Buttons for scraping and aligning -->
     <div>
         <button onclick="scrapeData()">Clean & Collect</button>
         <button onclick="alignData()">Align Sentences</button>
     </div>
 
+    <!-- New: File Upload Section -->
+    <div id="fileUploadSection">
+        <h2>Upload Text Files for Alignment</h2>
+        <input type="file" id="english_file" accept=".txt" /> (English text file)<br />
+        <input type="file" id="hindi_file" accept=".txt" /> (Hindi text file)<br />
+        <button onclick="uploadAndAlignFiles()">Upload & Align</button>
+    </div>
+
     <h2>Aligned Sentences</h2>
     <p id="loading">🔄 Aligning sentences, please wait...</p>
     <ul id="aligned_list"></ul>
-    
+
     <!-- CSV Download Section -->
     <div id="csvDownload"></div>
 
@@ -139,7 +156,7 @@
                 return;
             }
 
-            document.getElementById("loading").style.display = "block";  // Show loading message
+            document.getElementById("loading").style.display = "block";
 
             try {
                 let response = await fetch('/align', {
@@ -148,42 +165,90 @@
                     body: JSON.stringify({english_sentences, hindi_sentences})
                 });
 
-                if (!response.ok) throw new Error(`Server error: ${response.status}`);
+                let result = await response.json();
 
-                let data = await response.json();
+                if (result.error) {
+                    alert(result.error);
+                    document.getElementById("loading").style.display = "none";
+                    return;
+                }
 
-                // Display aligned sentences
-                document.getElementById('aligned_list').innerHTML = data.aligned_data.map(
-                    pair => `<li><b>${pair.id}.</b> ${pair.english} - <i>${pair.hindi}</i></li>`
-                ).join('');
-
-                // Create CSV Download
-                createCSVDownload(data.aligned_data);
+                renderAlignedData(result.aligned_data);
             } catch (error) {
-                console.error("Error aligning sentences:", error);
-                alert("Failed to align sentences. Check console for details.");
+                alert("Error in alignment.");
             } finally {
-                document.getElementById("loading").style.display = "none";  // Hide loading message
+                document.getElementById("loading").style.display = "none";
             }
         }
 
-        function createCSVDownload(aligned_data) {
-            let csvContent = "ID,English,Hindi\n";
-            csvContent += aligned_data.map(row => `${row.id},"${row.english}","${row.hindi}"`).join("\n");
+        async function uploadAndAlignFiles() {
+            let enFile = document.getElementById('english_file').files[0];
+            let hiFile = document.getElementById('hindi_file').files[0];
 
-            let blob = new Blob([csvContent], { type: "text/csv" });
-            let url = URL.createObjectURL(blob);
+            if (!enFile || !hiFile) {
+                alert("Please select both English and Hindi text files.");
+                return;
+            }
 
-            let downloadLink = document.createElement("a");
-            downloadLink.href = url;
-            downloadLink.download = "aligned_sentences.csv";
-            downloadLink.innerText = "📥 Download CSV";
+            document.getElementById("loading").style.display = "block";
 
-            let csvContainer = document.getElementById("csvDownload");
-            csvContainer.innerHTML = "";  // Clear previous download link
-            csvContainer.appendChild(downloadLink);
+            let formData = new FormData();
+            formData.append('english_file', enFile);
+            formData.append('hindi_file', hiFile);
+
+            try {
+                let response = await fetch('/upload-files', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                let result = await response.json();
+
+                if (result.error) {
+                    alert(result.error);
+                    document.getElementById("loading").style.display = "none";
+                    return;
+                }
+
+                // Show extracted sentences in left and right lists
+                document.getElementById('english_list').innerHTML = result.english.sentences
+                    .map(sentence => `<li>${sentence}</li>`)
+                    .join('');
+                
+                document.getElementById('hindi_list').innerHTML = result.hindi.sentences
+                    .map(sentence => `<li>${sentence}</li>`)
+                    .join('');
+
+                renderAlignedData(result.aligned_data);
+
+            } catch (error) {
+                alert("Failed to upload and align files.");
+            } finally {
+                document.getElementById("loading").style.display = "none";
+            }
+        }
+
+        function renderAlignedData(aligned_data) {
+            if (!aligned_data || aligned_data.length === 0) {
+                document.getElementById('aligned_list').innerHTML = "<li>No aligned sentences found.</li>";
+                document.getElementById('csvDownload').innerHTML = "";
+                return;
+            }
+
+            let alignedHtml = aligned_data.map(pair => 
+                `<li><b>${pair.id}.</b> EN: ${pair.english} <br> HI: ${pair.hindi}</li>`
+            ).join('');
+
+            document.getElementById('aligned_list').innerHTML = alignedHtml;
+
+            // Create CSV download button
+            let csvContent = "ID,English Sentence,Hindi Sentence\n" + 
+                aligned_data.map(pair => `"${pair.id}","${pair.english.replace(/"/g,'""')}","${pair.hindi.replace(/"/g,'""')}"`).join('\n');
+
+            let csvBlob = new Blob([csvContent], {type: 'text/csv'});
+            let csvUrl = URL.createObjectURL(csvBlob);
+            document.getElementById('csvDownload').innerHTML = `<a href="${csvUrl}" download="aligned_sentences.csv">Download Aligned CSV</a>`;
         }
     </script>
-
 </body>
 </html>
